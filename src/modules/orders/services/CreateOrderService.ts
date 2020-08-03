@@ -20,13 +20,70 @@ interface IRequest {
 @injectable()
 class CreateOrderService {
   constructor(
+    @inject('OrdersRepository')
     private ordersRepository: IOrdersRepository,
+    @inject('ProductsRepository')
     private productsRepository: IProductsRepository,
+    @inject('CustomersRepository')
     private customersRepository: ICustomersRepository,
   ) {}
 
   public async execute({ customer_id, products }: IRequest): Promise<Order> {
-    // TODO
+    const user = await this.customersRepository.findById(customer_id);
+
+    if (!user) {
+      throw new AppError('Can not creat a order with a invalid customer!');
+    }
+
+    const findProducts = await this.productsRepository.findAllById(products);
+
+    if (!findProducts.length) {
+      throw new AppError('Could not find products with the given ids');
+    }
+
+    const findProductsIDs = findProducts.map(product => product.id);
+
+    const checkInexistentsProducts = products.filter(
+      product => !findProductsIDs.includes(product.id),
+    );
+
+    if (checkInexistentsProducts.length) {
+      throw new AppError(
+        `Could not find the product: ${checkInexistentsProducts[0].id}`,
+      );
+    }
+
+    const productsWithNoQuantity = products.filter(
+      product =>
+        findProducts.filter(p => p.id === product.id)[0].quantity <
+        product.quantity,
+    );
+
+    if (productsWithNoQuantity.length) {
+      throw new AppError('Some products with insuficient quantity');
+    }
+
+    const serializedProducts = products.map(product => ({
+      product_id: product.id,
+      quantity: product.quantity,
+      price: findProducts.filter(p => p.id === product.id)[0].price,
+    }));
+
+    const order = await this.ordersRepository.create({
+      customer: user,
+      products: serializedProducts,
+    });
+
+    const orderedProductsQuantity = products.map(product => ({
+      id: product.id,
+      quantity:
+        findProducts.filter(p => p.id === product.id)[0].quantity -
+        product.quantity,
+    }));
+
+    await this.productsRepository.updateQuantity(orderedProductsQuantity);
+
+    return order;
   }
 }
 
